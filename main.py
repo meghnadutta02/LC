@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from graph.graph import create_research_graph
+from database.connection import test_connection
 from config.settings import settings
 from utils.logger import setup_logger
 
@@ -39,9 +40,26 @@ class AssistantResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    logger.info("Starting FastAPI Research Assistant...")
+    logger.info("🚀 Starting FastAPI Research Assistant...")
+
+    # Test database connection at startup
+    logger.info("🔌 Testing database connection...")
+    if test_connection():
+        logger.info("✅ Database connected successfully!")
+    else:
+        logger.error("❌ Database connection failed!")
+        logger.error(
+            "⚠️  Make sure pgvector is running: podman start pgvector")
+
+    # Check OpenAI configuration
+    if settings.openai_api_key and settings.openai_api_key != "your_openai_api_key_here":
+        logger.info("✅ OpenAI API key configured")
+    else:
+        logger.warning("⚠️  OpenAI API key not configured in .env")
+
     yield
-    logger.info("Shutting down FastAPI Research Assistant...")
+
+    logger.info("🛑 Shutting down FastAPI Research Assistant...")
 
 
 # Create FastAPI app
@@ -59,6 +77,7 @@ async def root():
     return {
         "name": "Research Assistant API",
         "version": "1.0.0",
+        "status": "running",
         "endpoints": {
             "assistant": "POST /assistant",
             "health": "GET /health",
@@ -82,7 +101,7 @@ async def assistant_endpoint(request: AssistantRequest):
             "context": "Focus on 2024-2025"
         }
     """
-    logger.info(f"Assistant request received: {request.query}")
+    logger.info(f"📝 Assistant request received: {request.query}")
 
     try:
         # Create LangGraph workflow
@@ -102,6 +121,9 @@ async def assistant_endpoint(request: AssistantRequest):
         config = {"recursion_limit": settings.recursion_limit}
         result = await graph.ainvoke(initial_state, config)
 
+        logger.info(
+            f"✅ Research completed with confidence: {result.get('confidence_score', 0):.2%}")
+
         return AssistantResponse(
             query=request.query,
             final_report=result.get("final_report", ""),
@@ -111,35 +133,41 @@ async def assistant_endpoint(request: AssistantRequest):
         )
 
     except Exception as e:
-        logger.error(f"Error in assistant endpoint: {str(e)}", exc_info=True)
+        logger.error(f"❌ Error in assistant endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    try:
-        from database.connection import get_db_connection
-        conn = get_db_connection()
-        conn.close()
-        db_status = "connected"
-    except:
-        db_status = "disconnected"
+    # Check database connection
+    db_connected = test_connection()
+
+    # Check OpenAI configuration
+    openai_configured = bool(
+        settings.openai_api_key and
+        settings.openai_api_key != "your_openai_api_key_here"
+    )
+
+    status = "healthy" if (db_connected and openai_configured) else "degraded"
 
     return {
-        "status": "healthy",
-        "database": db_status,
-        "openai_configured": bool(settings.openai_api_key)
+        "status": status,
+        "database": "connected" if db_connected else "disconnected",
+        "openai": "configured" if openai_configured else "not_configured",
+        "version": "1.0.0"
     }
 
 
 if __name__ == "__main__":
     logger.info(
-        f"Starting FastAPI server on {settings.api_host}:{settings.api_port}")
+        f"🌐 Starting FastAPI server on {settings.api_host}:{settings.api_port}")
     logger.info(
-        f"API Docs: http://{settings.api_host}:{settings.api_port}/docs")
+        f"📚 API Docs: http://{settings.api_host}:{settings.api_port}/docs")
     logger.info(
-        f"Assistant endpoint: POST http://{settings.api_host}:{settings.api_port}/assistant")
+        f"🔗 Assistant endpoint: POST http://{settings.api_host}:{settings.api_port}/assistant")
+    logger.info(
+        f"💓 Health check: GET http://{settings.api_host}:{settings.api_port}/health")
 
     uvicorn.run(
         "main:app",
