@@ -1,19 +1,7 @@
-"""
-MCP Server for Research Assistant.
-
-Exposes the assistant as MCP tools for use with MCP Inspector.
-
-Usage:
-    python -m mcp.server
-    
-    Or with MCP Inspector:
-    npx @modelcontextprotocol/inspector python -m mcp.server
-"""
-
 import asyncio
-from typing import Any, Sequence
-from mcp.server import Server
-from mcp.types import Tool, TextContent, ImageContent, EmbeddedResource
+from typing import Sequence
+from mcp.fastmcp import FastMCP
+from mcp.types import TextContent
 from mcp.server.stdio import stdio_server
 
 from graph.graph import create_research_graph
@@ -23,85 +11,23 @@ from utils.logger import setup_logger
 
 logger = setup_logger("mcp_server")
 
-# Create MCP server
-app = Server("research-assistant-mcp")
+mcp = FastMCP("research-assistant-mcp")
 
 
-@app.list_tools()
-async def list_tools() -> list[Tool]:
-    """List available MCP tools."""
-    return [
-        Tool(
-            name="research_query",
-            description="Execute a research query using multi-agent workflow (5 specialized agents)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Research question to investigate",
-                        "minLength": 10
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "Additional context or constraints",
-                        "default": ""
-                    }
-                },
-                "required": ["query"]
-            }
-        ),
-        Tool(
-            name="search_documents",
-            description="Semantic search using vector embeddings in pgvector",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query",
-                        "minLength": 3
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Max results (1-50)",
-                        "default": 10,
-                        "minimum": 1,
-                        "maximum": 50
-                    }
-                },
-                "required": ["query"]
-            }
-        )
-    ]
+@mcp.tool()
+async def research_query(query: str, context: str = "") -> str:
+    """
+    Execute a research query using a multi-agent workflow.
 
+    Args:
+        query (str): Research question to investigate. Minimum 10 characters.
+        context (str, optional): Additional context or constraints to narrow the search. Defaults to "".
 
-@app.call_tool()
-async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
-    """Handle tool execution."""
-    logger.info(f"MCP Tool called: {name}")
-
-    try:
-        if name == "research_query":
-            return await execute_research(arguments)
-        elif name == "search_documents":
-            return await search_documents(arguments)
-        else:
-            raise ValueError(f"Unknown tool: {name}")
-    except Exception as e:
-        logger.error(f"Error in MCP tool {name}: {str(e)}", exc_info=True)
-        return [TextContent(type="text", text=f"Error: {str(e)}")]
-
-
-async def execute_research(arguments: dict) -> Sequence[TextContent]:
-    """Execute research query."""
-    query = arguments.get("query")
-    context = arguments.get("context", "")
-
-    logger.info(f"Executing research: {query}")
-
+    Returns:
+        str: A detailed research report as a string.
+    """
+    logger.info(f"Executing research query: {query}")
     graph = create_research_graph()
-
     initial_state = {
         "query": query,
         "context": context,
@@ -110,38 +36,24 @@ async def execute_research(arguments: dict) -> Sequence[TextContent]:
         "messages": [],
         "current_step": "coordinator"
     }
-
     config = {"recursion_limit": settings.recursion_limit}
     result = await graph.ainvoke(initial_state, config)
-
-    report = result.get("final_report", "No report generated")
-    summary = result.get("executive_summary", "")
-
-    response = f"""# Research Report
-
-## Query
-{query}
-
-## Summary
-{summary}
-
-## Full Report
-{report}
-
-## Confidence
-{result.get('confidence_score', 0):.2%}
-"""
-
-    return [TextContent(type="text", text=response)]
+    return result.get("final_report", "No report generated")
 
 
-async def search_documents(arguments: dict) -> Sequence[TextContent]:
-    """Search documents using vector similarity."""
-    query = arguments.get("query")
-    max_results = arguments.get("max_results", 10)
+@mcp.tool()
+async def search_documents(query: str, max_results: int = 10) -> str:
+    """
+    Perform semantic search in the vector store using vector embeddings.
 
+    Args:
+        query (str): Search query. Minimum 3 characters.
+        max_results (int, optional): Maximum number of results to return. Defaults to 10.
+
+    Returns:
+        str: A formatted string listing matching documents with titles, similarity scores, and excerpts.
+    """
     logger.info(f"Searching documents: {query}")
-
     vector_store = VectorStore()
     results = await vector_store.search(query=query, max_results=max_results)
 
@@ -152,16 +64,17 @@ async def search_documents(arguments: dict) -> Sequence[TextContent]:
         response += f"**Similarity:** {result.get('similarity', 0):.2%}\n"
         response += f"{result.get('content', '')[:300]}...\n\n"
 
-    return [TextContent(type="text", text=response)]
+    return response
 
 
 async def main():
-    """Run MCP server."""
-    logger.info("Starting MCP Server...")
-    logger.info("Use: npx @modelcontextprotocol/inspector python -m mcp.server")
+    """Start the MCP server using stdio transport."""
+    logger.info("Starting MCP Server with FastMCP...")
+    logger.info(
+        "Run Inspector with: npx @modelcontextprotocol/inspector python -m mcp.server")
 
     async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+        await mcp.run(read_stream, write_stream, mcp.create_initialization_options())
 
 
 if __name__ == "__main__":
