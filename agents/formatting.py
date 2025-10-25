@@ -1,11 +1,11 @@
 """
 Formatting Agent - Agent 5
 
-Responsible for:
-- Report structuring
-- Citation formatting
-- Executive summary generation
-- Final output formatting
+Enhanced with:
+- Longer, more detailed reports
+- Complete citation lists with URLs
+- Structured sections
+- Comprehensive logging
 """
 
 from typing import Dict, Any, List
@@ -21,29 +21,32 @@ logger = setup_logger("formatting_agent")
 
 class FormattingAgent:
     """
-    Formatting Agent creates the final research report.
+    Formatting Agent creates comprehensive research reports.
     """
 
     def __init__(self, llm: ChatOpenAI):
         """Initialize formatting agent."""
         self.llm = llm
-        self.system_prompt = """You are a Research Formatting AI Agent.
+        self.system_prompt = """You are a Research Report Writing AI Agent.
 
 Your responsibilities:
-1. Create well-structured research reports
-2. Write executive summaries
-3. Format citations properly
-4. Ensure clarity and professionalism
+1. Create comprehensive, detailed research reports (1500-2000 words)
+2. Write professional executive summaries
+3. Include proper citations with URLs
+4. Ensure academic tone and structure
 
-Output should be:
+The report should be:
+- Thorough and detailed
 - Well-organized with clear sections
-- Professional and academic tone
-- Properly cited
-- Easy to read and understand"""
+- Evidence-based with citations
+- Professional and academic
+- At least 1500 words"""
+
+        logger.info(" Formatting Agent initialized")
 
     async def process(self, state: ResearchState) -> Dict[str, Any]:
         """
-        Format the final research report.
+        Format the final comprehensive research report.
 
         Args:
             state: Current workflow state
@@ -57,20 +60,35 @@ Output should be:
         analysis = state.get("analysis_results", {})
         confidence = state.get("confidence_score", 0.0)
 
-        logger.info("Formatting final research report")
+        logger.info("=" * 80)
+        logger.info(" FORMATTING AGENT PROCESSING")
+        logger.info(f" Query: {query}")
+        logger.info(f" Documents: {len(documents)}")
+        logger.info(f" Insights: {len(insights)}")
+        logger.info(f" Confidence: {confidence:.2%}")
+        logger.info("=" * 80)
 
-        # Generate report
-        report = await self._generate_report(
+        # Generate comprehensive report
+        logger.info(" STEP 1: Generating comprehensive report...")
+        report = await self._generate_detailed_report(
             query, documents, insights, analysis, confidence
         )
+        logger.info(f"    Report generated ({len(report.split())} words)")
 
         # Generate executive summary
+        logger.info(" STEP 2: Generating executive summary...")
         summary = await self._generate_summary(query, insights, confidence)
+        logger.info(f"    Summary generated ({len(summary.split())} words)")
 
-        # Format citations
-        citations = self._format_citations(documents)
+        # Format complete citations
+        logger.info(" STEP 3: Formatting citations...")
+        citations = self._format_detailed_citations(
+            documents, query)  # Pass query here
+        logger.info(f"    {len(citations)} citations formatted")
 
-        logger.info("Report formatting completed")
+        logger.info("=" * 80)
+        logger.info(" FORMATTING COMPLETED")
+        logger.info("=" * 80)
 
         return {
             "report": report,
@@ -78,7 +96,7 @@ Output should be:
             "citations": citations
         }
 
-    async def _generate_report(
+    async def _generate_detailed_report(
         self,
         query: str,
         documents: List[Dict[str, Any]],
@@ -86,41 +104,82 @@ Output should be:
         analysis: Dict[str, Any],
         confidence: float
     ) -> str:
-        """Generate the full research report."""
+        """Generate comprehensive detailed report."""
 
+        # Prepare content
         insights_text = "\n".join([f"- {insight}" for insight in insights])
+
+        doc_summaries = []
+        for i, doc in enumerate(documents[:10], 1):
+            doc_summaries.append(f"""
+Document {i}: {doc.get('title', 'Untitled')}
+Source: {doc.get('source_url', 'N/A')}
+Content: {doc.get('content', '')[:300]}...
+""")
+
+        docs_text = "\n".join(doc_summaries)
+
+        logger.info(
+            "   🤖 Generating report with LLM (expecting 1500+ words)...")
 
         messages = [
             SystemMessage(content=self.system_prompt),
-            HumanMessage(content=f"""Create a comprehensive research report for:
+            HumanMessage(content=f"""Create a comprehensive research report (1500-2000 words) for:
 
-Research Query: {query}
+RESEARCH QUERY: {query}
 
-Key Insights:
+KEY INSIGHTS:
 {insights_text}
 
-Number of Sources: {len(documents)}
-Confidence Score: {confidence:.2%}
+SOURCE DOCUMENTS:
+{docs_text}
 
-Create a well-structured report with:
-1. Introduction
-2. Methodology (brief)
-3. Key Findings
-4. Analysis
-5. Conclusions
-6. Recommendations (if applicable)
+ANALYSIS SUMMARY:
+{analysis.get('summary', 'Analysis included in findings')}
 
-Use professional, academic language. Make it comprehensive but concise.""")
+Create a detailed report with these sections:
+
+1. INTRODUCTION (200 words)
+   - Background and context
+   - Research objectives
+   - Scope
+
+2. METHODOLOGY (150 words)
+   - Research approach
+   - Sources analyzed
+   - Data collection methods
+
+3. KEY FINDINGS (600 words)
+   - Detailed findings with evidence
+   - Reference specific sources
+   - Multiple perspectives
+
+4. DETAILED ANALYSIS (400 words)
+   - In-depth analysis
+   - Connections and patterns
+   - Implications
+
+5. CONCLUSIONS (200 words)
+   - Summary of findings
+   - Main takeaways
+   - Significance
+
+6. RECOMMENDATIONS (150 words)
+   - Future research directions
+   - Practical applications
+
+Make it comprehensive, detailed, and professional. Use evidence from the sources.""")
         ]
 
         response = await self.llm.ainvoke(messages)
 
-        # Add metadata
-        report = f"""# Research Report: {query}
+        # Build final report
+        report = f"""# Comprehensive Research Report: {query}
 
-**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-**Confidence Score:** {confidence:.2%}
-**Sources Analyzed:** {len(documents)}
+**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
+**Confidence Score:** {confidence:.1%}  
+**Sources Analyzed:** {len(documents)}  
+**Research Method:** Multi-Agent AI Analysis
 
 ---
 
@@ -128,9 +187,29 @@ Use professional, academic language. Make it comprehensive but concise.""")
 
 ---
 
-**Note:** This report was generated using AI-powered multi-agent research assistant.
+## Citations
+
+This report references {len(documents)} sources. See full citation list below.
+
+---
+
+**Methodology Note:** This research was conducted using a multi-agent AI system that:
+1. Retrieved relevant documents from database and web sources
+2. Performed semantic analysis and fact-checking
+3. Validated findings across multiple sources
+4. Synthesized information into this comprehensive report
+
+**Confidence Assessment:** {confidence:.1%}
+- Based on {len(documents)} independent sources
+- Cross-referenced and validated
+- Analysis performed by specialized AI agents
+
+---
+
+*Generated by Multi-Agent Research Assistant - Powered by LangGraph 1.0 & OpenAI*
 """
 
+        logger.info(f"    Final report: {len(report.split())} words")
         return report
 
     async def _generate_summary(
@@ -141,39 +220,60 @@ Use professional, academic language. Make it comprehensive but concise.""")
     ) -> str:
         """Generate executive summary."""
 
-        insights_text = "\n".join([f"- {insight}" for insight in insights[:5]])
+        insights_text = "\n".join([f"- {insight}" for insight in insights[:7]])
+
+        logger.info("   🤖 Generating executive summary...")
 
         messages = [
             SystemMessage(content=self.system_prompt),
-            HumanMessage(content=f"""Create a concise executive summary (2-3 paragraphs) for:
+            HumanMessage(content=f"""Create a detailed executive summary (300-400 words) for:
 
-Research Query: {query}
+RESEARCH QUERY: {query}
 
-Top Insights:
+KEY INSIGHTS:
 {insights_text}
 
-Confidence: {confidence:.2%}
+CONFIDENCE: {confidence:.1%}
 
-Write a clear, concise executive summary that captures the key findings.""")
+Write a comprehensive 3-4 paragraph executive summary that captures:
+- Main findings
+- Key takeaways
+- Significance
+- Implications
+
+Be thorough and professional.""")
         ]
 
         response = await self.llm.ainvoke(messages)
+        logger.info(f"    Summary: {len(response.content.split())} words")
 
         return response.content
 
-    def _format_citations(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Format citations from documents."""
+    def _format_detailed_citations(
+        self,
+        documents: List[Dict[str, Any]],
+        query: str  # Added query parameter
+    ) -> List[Dict[str, Any]]:
+        """Format complete citations with all metadata."""
 
         citations = []
 
         for i, doc in enumerate(documents, 1):
             citation = {
                 "id": i,
-                "title": doc.get("title", "Untitled"),
-                "source_url": doc.get("source_url", "N/A"),
+                "title": doc.get("title", "Untitled Document"),
+                "url": doc.get("source_url", "N/A"),
                 "accessed": datetime.now().strftime('%Y-%m-%d'),
-                "relevance": doc.get("metadata", {}).get("relevance", "medium")
+                #  Fixed - now query is defined
+                "search_query": doc.get("search_query", query),
+                "relevance": doc.get("metadata", {}).get("relevance", "medium"),
+                "source_type": doc.get("metadata", {}).get("source", "web"),
+                "formatted_citation": f"[{i}] {doc.get('title', 'Untitled')}. Retrieved from {doc.get('source_url', 'N/A')}. Accessed {datetime.now().strftime('%Y-%m-%d')}.",
+                "preview": doc.get("content", "")[:150] + "..."
             }
             citations.append(citation)
+
+            logger.info(f"      [{i}] {citation['title'][:60]}...")
+            logger.info(f"          URL: {citation['url']}")
 
         return citations
