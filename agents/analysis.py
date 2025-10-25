@@ -1,11 +1,7 @@
 """
 Analysis Agent - Agent 3
 
-Responsible for:
-- Comparative analysis
-- Trend detection
-- Causal reasoning
-- Statistical analysis
+ detailed logging of analysis process.
 """
 
 from typing import Dict, Any, List
@@ -19,9 +15,7 @@ logger = setup_logger("analysis_agent")
 
 
 class AnalysisAgent:
-    """
-    Analysis Agent performs deep analysis on retrieved documents.
-    """
+    """Analysis Agent performs deep analysis on retrieved documents."""
 
     def __init__(self, llm: ChatOpenAI):
         """Initialize analysis agent."""
@@ -29,36 +23,57 @@ class AnalysisAgent:
         self.system_prompt = """You are a Research Analysis AI Agent.
 
 Your responsibilities:
-1. Perform comparative analysis across multiple documents
+1. Perform comparative analysis across documents
 2. Identify trends and patterns
 3. Detect causal relationships
-4. Generate key insights
+4. Generate detailed insights (aim for 8-10 insights)
 
-Be analytical, objective, and evidence-based. Support all claims with references to the documents."""
+Be analytical, objective, and evidence-based. Provide thorough analysis."""
+
+        logger.info("🔬 Analysis Agent initialized")
 
     async def process(self, state: ResearchState) -> Dict[str, Any]:
-        """
-        Analyze retrieved documents.
+        """Analyze retrieved documents."""
 
-        Args:
-            state: Current workflow state
-
-        Returns:
-            Dictionary with analysis results
-        """
         query = state["query"]
         documents = state.get("retrieved_documents", [])
 
-        logger.info(f"Analysis agent analyzing {len(documents)} documents")
+        logger.info("=" * 80)
+        logger.info("🔬 ANALYSIS AGENT PROCESSING")
+        logger.info(f"📋 Query: {query}")
+        logger.info(f"📚 Documents to analyze: {len(documents)}")
+        logger.info("=" * 80)
 
         if not documents:
-            logger.warning("No documents to analyze")
+            logger.warning("⚠️  No documents to analyze")
             return self._empty_analysis()
 
+        # Log document summary
+        logger.info("📄 Document Summary:")
+        for i, doc in enumerate(documents[:5], 1):
+            logger.info(f"   {i}. {doc.get('title', 'Untitled')[:60]}...")
+            logger.info(f"      Source: {doc.get('source_url', 'N/A')}")
+
+        if len(documents) > 5:
+            logger.info(f"   ... and {len(documents) - 5} more documents")
+
         # Perform analysis
+        logger.info("🤖 STEP 1: Performing deep analysis with LLM...")
         analysis_results = await self._analyze_documents(query, documents)
 
-        logger.info("Analysis completed")
+        logger.info(f"   ✅ Analysis complete")
+        logger.info(
+            f"   💡 Generated {len(analysis_results['insights'])} insights")
+
+        # Log insights
+        logger.info("💡 Key Insights:")
+        for i, insight in enumerate(analysis_results['insights'], 1):
+            logger.info(f"   {i}. {insight[:100]}...")
+
+        logger.info("=" * 80)
+        logger.info(
+            f"✅ ANALYSIS COMPLETED: {len(analysis_results['insights'])} insights generated")
+        logger.info("=" * 80)
 
         return analysis_results
 
@@ -67,13 +82,15 @@ Be analytical, objective, and evidence-based. Support all claims with references
         query: str,
         documents: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Perform analysis on documents."""
+        """Perform detailed analysis on documents."""
 
-        # Prepare document summaries
+        # Prepare document summaries (use more documents for analysis)
         doc_summaries = "\n\n".join([
-            f"Document {i+1} ({doc.get('title', 'Untitled')}):\n{doc['content'][:500]}..."
-            for i, doc in enumerate(documents[:5])  # Limit to 5 docs
+            f"Document {i+1}: {doc.get('title', 'Untitled')}\nSource: {doc.get('source_url', 'N/A')}\nContent: {doc['content'][:600]}..."
+            for i, doc in enumerate(documents[:8])  # Increased from 5 to 8
         ])
+
+        logger.info(f"   📊 Analyzing {min(len(documents), 8)} documents...")
 
         messages = [
             SystemMessage(content=self.system_prompt),
@@ -83,17 +100,20 @@ Documents:
 {doc_summaries}
 
 Perform a comprehensive analysis:
-1. Compare and contrast the information across documents
-2. Identify key trends or patterns
-3. Note any causal relationships
-4. Generate 5-7 key insights
+1. Compare and contrast information across documents
+2. Identify key trends, patterns, or themes
+3. Note any causal relationships or correlations
+4. Generate 8-10 detailed, specific insights
 
-Provide structured, evidence-based analysis.""")
+Provide thorough, evidence-based analysis with specific references to the documents.""")
         ]
 
         response = await self.llm.ainvoke(messages)
 
-        # Parse insights from response
+        logger.info(
+            f"   📝 LLM response length: {len(response.content)} characters")
+
+        # Parse insights
         insights = self._extract_insights(response.content)
 
         return {
@@ -113,10 +133,13 @@ Provide structured, evidence-based analysis.""")
             # Look for bullet points or numbered lists
             if line.startswith(("- ", "* ", "• ")) or (line and line[0].isdigit() and ". " in line):
                 insight = line.lstrip("-*•0123456789. ").strip()
-                if len(insight) > 20:  # Meaningful insights
+                if len(insight) > 30:  # More substantial insights
                     insights.append(insight)
+                    logger.debug(
+                        f"      → Extracted insight: {insight[:80]}...")
 
-        return insights[:7]  # Limit to 7 insights
+        logger.info(f"   ✓ Extracted {len(insights)} insights from analysis")
+        return insights[:10]  # Limit to 10 best insights
 
     def _extract_comparisons(self, content: str) -> List[Dict[str, Any]]:
         """Extract comparative findings."""
@@ -128,6 +151,7 @@ Provide structured, evidence-based analysis.""")
 
     def _empty_analysis(self) -> Dict[str, Any]:
         """Return empty analysis structure."""
+        logger.warning("⚠️  Returning empty analysis")
         return {
             "analysis": {},
             "comparisons": [],
