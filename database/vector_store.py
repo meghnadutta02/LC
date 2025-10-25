@@ -5,6 +5,7 @@ Handles document storage with OpenAI embeddings and semantic search.
 """
 
 import uuid
+import json
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 import numpy as np
@@ -83,20 +84,23 @@ class VectorStore:
             # Convert embedding to PostgreSQL array format
             embedding_str = "[" + ",".join(map(str, embedding)) + "]"
 
+            # Convert metadata dict to JSON string
+            metadata_json = json.dumps(metadata or {})
+
             # Store in database
             conn = get_db_connection()
             cursor = conn.cursor()
 
             cursor.execute("""
                 INSERT INTO documents (workflow_id, content, title, source_url, metadata, embedding)
-                VALUES (%s, %s, %s, %s, %s, %s::vector)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s::vector)
                 RETURNING id
             """, (
                 workflow_id,
                 content,
                 title,
                 source_url,
-                metadata or {},
+                metadata_json,
                 embedding_str
             ))
 

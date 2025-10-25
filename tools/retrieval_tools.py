@@ -47,9 +47,11 @@ async def web_search_tool(query: str, max_results: int = 5) -> Dict[str, Any]:
         max_results: Maximum number of results
 
     Returns:
-        Dictionary with search results
+        Dictionary with search results including titles, URLs, and snippets
     """
-    logger.info(f"Web search: {query}")
+    logger.info("=" * 80)
+    logger.info(f"[WEB SEARCH] Searching for: '{query}'")
+    logger.info("=" * 80)
 
     try:
         # Use DuckDuckGo (free alternative)
@@ -60,33 +62,69 @@ async def web_search_tool(query: str, max_results: int = 5) -> Dict[str, Any]:
         results = []
         snippets = results_text.split('\n\n')
 
-        for i, snippet in enumerate(snippets[:max_results]):
-            if snippet.strip():
-                results.append({
-                    "title": f"Result {i+1}",
-                    "snippet": snippet.strip(),
-                    "source": "DuckDuckGo"
-                })
+        logger.info(f"[WEB SEARCH] Found {len(snippets)} results:")
+        logger.info("-" * 80)
 
-        logger.info(f"Found {len(results)} results")
+        for i, snippet in enumerate(snippets[:max_results], 1):
+            if snippet.strip():
+                # Try to extract title and URL from snippet
+                lines = snippet.strip().split('\n')
+                title = lines[0] if lines else f"Result {i}"
+                url = lines[1] if len(
+                    lines) > 1 and lines[1].startswith('http') else "N/A"
+                content = '\n'.join(lines[1:]) if len(
+                    lines) > 1 else snippet.strip()
+
+                result = {
+                    "id": i,
+                    "title": title,
+                    "url": url,
+                    "snippet": content,
+                    "source": "DuckDuckGo"
+                }
+                results.append(result)
+
+                # Log each result with source
+                logger.info(f"[SOURCE #{i}]")
+                logger.info(f"  Title: {title}")
+                logger.info(f"  URL: {url}")
+                logger.info(f"  Preview: {content[:150]}...")
+                logger.info("-" * 80)
+
+        logger.info(
+            f"[WEB SEARCH] Successfully retrieved {len(results)} sources")
+        logger.info("=" * 80)
 
         return {
             "query": query,
             "results": results,
-            "total_found": len(results)
+            "total_found": len(results),
+            "sources": [{"title": r["title"], "url": r["url"]} for r in results]
         }
 
     except Exception as e:
-        logger.error(f"Web search error: {str(e)}")
-        # Fallback to mock data
+        logger.error(f"[WEB SEARCH] Error: {str(e)}")
+
+        # Fallback to mock data with logging
+        logger.warning("[WEB SEARCH] Using fallback mock data")
+        mock_result = {
+            "id": 1,
+            "title": f"Research on {query}",
+            "url": f"https://example.com/research/{query.replace(' ', '-')}",
+            "snippet": f"Information about {query} from web search.",
+            "source": "mock"
+        }
+
+        logger.info("[SOURCE #1] (MOCK)")
+        logger.info(f"  Title: {mock_result['title']}")
+        logger.info(f"  URL: {mock_result['url']}")
+        logger.info(f"  Preview: {mock_result['snippet']}")
+
         return {
             "query": query,
-            "results": [{
-                "title": f"Research on {query}",
-                "snippet": f"Information about {query} from web search.",
-                "source": "mock"
-            }],
-            "total_found": 1
+            "results": [mock_result],
+            "total_found": 1,
+            "sources": [{"title": mock_result["title"], "url": mock_result["url"]}]
         }
 
 
@@ -107,7 +145,7 @@ async def semantic_search_tool(
     Returns:
         Dictionary with semantically similar documents
     """
-    logger.info(f"Semantic search: {query}")
+    logger.info(f"[SEMANTIC SEARCH] Searching: {query}")
 
     try:
         vector_store = VectorStore()
@@ -124,7 +162,7 @@ async def semantic_search_tool(
         }
 
     except Exception as e:
-        logger.error(f"Semantic search error: {str(e)}")
+        logger.error(f"[SEMANTIC SEARCH] Error: {str(e)}")
         return {
             "query": query,
             "results": [],
@@ -146,7 +184,7 @@ async def extract_text_tool(url: str) -> Dict[str, Any]:
     Returns:
         Dictionary with extracted text
     """
-    logger.info(f"Extracting text from: {url}")
+    logger.info(f"[TEXT EXTRACTION] Extracting from: {url}")
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -169,6 +207,9 @@ async def extract_text_tool(url: str) -> Dict[str, Any]:
                       for line in lines for phrase in line.split("  "))
             text = ' '.join(chunk for chunk in chunks if chunk)
 
+            logger.info(
+                f"[TEXT EXTRACTION] Extracted {len(text)} characters from {url}")
+
             return {
                 "url": url,
                 "text": text[:5000],  # Limit to 5000 chars
@@ -177,7 +218,7 @@ async def extract_text_tool(url: str) -> Dict[str, Any]:
             }
 
     except Exception as e:
-        logger.error(f"Text extraction error: {str(e)}")
+        logger.error(f"[TEXT EXTRACTION] Error: {str(e)}")
         return {
             "url": url,
             "text": "",
