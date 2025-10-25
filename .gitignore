@@ -76,3 +76,35 @@ dmypy.json
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+
+
+
+# OpenAI Configuration
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4o
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_TEMPERATURE=0.7
+OPENAI_MAX_TOKENS=4096
+
+# PostgreSQL with pgvector
+# Start pgvector manually: podman run --name pgvector -e POSTGRES_PASSWORD=research_pass -p 5432:5432 -d pgvector/pgvector:pg16
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=research_assistant
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=research_pass
+
+# Database URL
+DATABASE_URL=postgresql://postgres:research_pass@localhost:5432/research_assistant
+
+# LangGraph Configuration
+MAX_ITERATIONS=25
+RECURSION_LIMIT=50
+
+# FastAPI
+API_HOST=0.0.0.0
+API_PORT=8000
+
+# Logging
+LOG_LEVEL=INFO
