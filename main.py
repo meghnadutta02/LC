@@ -8,6 +8,7 @@ Main FastAPI app with integrated MCP protocol server.
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from typing import List, Dict
 from mcp.server import Server
 import asyncio
 
@@ -19,8 +20,6 @@ logger = setup_logger("fastapi_mcp_app")
 
 # Create MCP server instance
 mcp_server = Server("research-assistant")
-
-# Example MCP tool
 
 
 @mcp_server.call_tool()
@@ -48,8 +47,9 @@ async def research_query(query: str, context: str = "") -> str:
 async def list_tools():
     return [
         {"name": "research_query",
-            "description": "Run a research query, return full report."}
+         "description": "Run a research query, return full report."}
     ]
+
 
 # Create main FastAPI app
 app = FastAPI(
@@ -71,6 +71,13 @@ app.add_middleware(
 app.mount("/mcp", mcp_server.asgi_app())
 
 
+class Citation(BaseModel):
+    id: int
+    title: str
+    url: str
+    preview: str
+
+
 class AssistantRequest(BaseModel):
     query: str = Field(..., min_length=10, description="Research query")
     context: str = Field("", description="Additional context or constraints")
@@ -79,6 +86,7 @@ class AssistantRequest(BaseModel):
 class AssistantResponse(BaseModel):
     query: str
     final_report: str
+    citations: List[Citation] = []
 
 
 @app.post("/assistant", response_model=AssistantResponse)
@@ -96,7 +104,22 @@ async def assistant_endpoint(request: AssistantRequest):
         }
         config = {"recursion_limit": settings.recursion_limit}
         result = await graph.ainvoke(initial_state, config)
-        return AssistantResponse(query=request.query, final_report=result.get("final_report", ""))
+
+        documents = result.get("retrieved_documents", [])
+        citations = []
+        for i, doc in enumerate(documents, 1):
+            citations.append({
+                "id": i,
+                "title": doc.get("title", "Untitled Document"),
+                "url": doc.get("source_url", "N/A"),
+                "preview": (doc.get("content", "")[:150] + "...") if doc.get("content") else ""
+            })
+
+        return AssistantResponse(
+            query=request.query,
+            final_report=result.get("final_report", ""),
+            citations=citations
+        )
     except Exception as e:
         logger.error(f"[HTTP API] Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
