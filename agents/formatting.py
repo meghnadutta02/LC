@@ -172,8 +172,17 @@ Make it comprehensive, detailed, and professional. Use evidence from the sources
         ]
 
         response = await self.llm.ainvoke(messages)
+        report_content = response.content
 
-        # Build final report
+        # Now format complete citations with URLs
+        citations = self._format_detailed_citations(documents, query)
+
+        # Build citation Markdown section
+        citations_md = "\n\n---\n\n## References\n\n"
+        for c in citations:
+            citations_md += f"{c['id']}. [{c['title']}]({c['url']})  \n"
+
+        # Final combined report including citations
         report = f"""# Comprehensive Research Report: {query}
 
 **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
@@ -183,13 +192,9 @@ Make it comprehensive, detailed, and professional. Use evidence from the sources
 
 ---
 
-{response.content}
+{report_content}
 
----
-
-## Citations
-
-This report references {len(documents)} sources. See full citation list below.
+{citations_md}
 
 ---
 
@@ -274,6 +279,6 @@ Be thorough and professional.""")
             citations.append(citation)
 
             logger.info(f"      [{i}] {citation['title'][:60]}...")
-            logger.info(f"          URL: {citation['url']}")
+            logger.info(f"           URL: {citation['url']}")
 
         return citations
