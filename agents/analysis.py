@@ -1,21 +1,15 @@
-"""
-Analysis Agent - Agent 3
-
- detailed logging of analysis process.
-"""
-
 from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
-
 from graph.state import ResearchState
 from utils.logger import setup_logger
+import numpy as np
 
 logger = setup_logger("analysis_agent")
 
 
 class AnalysisAgent:
-    """Analysis Agent performs deep analysis on retrieved documents."""
+    """Analysis Agent performs deep analysis on retrieved documents including numeric/statistical analysis."""
 
     def __init__(self, llm: ChatOpenAI):
         """Initialize analysis agent."""
@@ -27,13 +21,14 @@ Your responsibilities:
 2. Identify trends and patterns
 3. Detect causal relationships
 4. Generate detailed insights (aim for 8-10 insights)
+5. Provide summary statistics and numeric analysis
 
 Be analytical, objective, and evidence-based. Provide thorough analysis."""
 
         logger.info("🔬 Analysis Agent initialized")
 
     async def process(self, state: ResearchState) -> Dict[str, Any]:
-        """Analyze retrieved documents."""
+        """Analyze retrieved documents including statistics."""
 
         query = state["query"]
         documents = state.get("retrieved_documents", [])
@@ -57,11 +52,15 @@ Be analytical, objective, and evidence-based. Provide thorough analysis."""
         if len(documents) > 5:
             logger.info(f"   ... and {len(documents) - 5} more documents")
 
-        # Perform analysis
-        logger.info("🤖 STEP 1: Performing deep analysis with LLM...")
-        analysis_results = await self._analyze_documents(query, documents)
+        # Compute numeric statistics if possible
+        stats = self._compute_summary_statistics(documents)
+        if stats:
+            logger.info(f"📊 Numeric summary stats computed: {stats}")
 
-        logger.info(f"   ✅ Analysis complete")
+        # Perform analysis with LLM including stats information
+        analysis_results = await self._analyze_documents(query, documents, stats)
+
+        logger.info("   ✅ Analysis complete")
         logger.info(
             f"   💡 Generated {len(analysis_results['insights'])} insights")
 
@@ -77,20 +76,43 @@ Be analytical, objective, and evidence-based. Provide thorough analysis."""
 
         return analysis_results
 
+    def _compute_summary_statistics(self, documents: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Compute summary statistics from numeric metadata in documents."""
+        values = []
+        for doc in documents:
+            val = doc.get("metadata", {}).get("value")
+            if isinstance(val, (int, float)):
+                values.append(val)
+        if not values:
+            return {}
+
+        return {
+            "count": len(values),
+            "mean": float(np.mean(values)),
+            "stddev": float(np.std(values)),
+            "min": float(np.min(values)),
+            "max": float(np.max(values)),
+        }
+
     async def _analyze_documents(
         self,
         query: str,
-        documents: List[Dict[str, Any]]
+        documents: List[Dict[str, Any]],
+        stats: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        """Perform detailed analysis on documents."""
+        """Perform detailed analysis on documents, including stats summary."""
 
-        # Prepare document summaries (use more documents for analysis)
         doc_summaries = "\n\n".join([
             f"Document {i+1}: {doc.get('title', 'Untitled')}\nSource: {doc.get('source_url', 'N/A')}\nContent: {doc['content'][:600]}..."
-            for i, doc in enumerate(documents[:8])  # Increased from 5 to 8
+            for i, doc in enumerate(documents[:8])
         ])
 
-        logger.info(f"   📊 Analyzing {min(len(documents), 8)} documents...")
+        stats_text = ""
+        if stats:
+            stats_text = (
+                "\n\nSummary Statistics:\n" +
+                "\n".join([f"- {k}: {v}" for k, v in stats.items()])
+            )
 
         messages = [
             SystemMessage(content=self.system_prompt),
@@ -99,13 +121,17 @@ Be analytical, objective, and evidence-based. Provide thorough analysis."""
 Documents:
 {doc_summaries}
 
+{stats_text}
+
 Perform a comprehensive analysis:
 1. Compare and contrast information across documents
 2. Identify key trends, patterns, or themes
 3. Note any causal relationships or correlations
 4. Generate 8-10 detailed, specific insights
+5. Provide meaningful interpretations of the numeric statistics above
 
-Provide thorough, evidence-based analysis with specific references to the documents.""")
+Provide thorough, evidence-based analysis with specific references to the documents.
+""")
         ]
 
         response = await self.llm.ainvoke(messages)
@@ -113,33 +139,29 @@ Provide thorough, evidence-based analysis with specific references to the docume
         logger.info(
             f"   📝 LLM response length: {len(response.content)} characters")
 
-        # Parse insights
         insights = self._extract_insights(response.content)
 
         return {
             "analysis": {"summary": response.content},
             "comparisons": self._extract_comparisons(response.content),
             "trends": self._extract_trends(response.content),
-            "insights": insights
+            "insights": insights,
+            "statistics": stats or {}
         }
 
     def _extract_insights(self, content: str) -> List[str]:
         """Extract key insights from LLM response."""
         insights = []
-
         lines = content.split("\n")
         for line in lines:
             line = line.strip()
-            # Look for bullet points or numbered lists
             if line.startswith(("- ", "* ", "• ")) or (line and line[0].isdigit() and ". " in line):
                 insight = line.lstrip("-*•0123456789. ").strip()
-                if len(insight) > 30:  # More substantial insights
+                if len(insight) > 30:
                     insights.append(insight)
-                    logger.debug(
-                        f"      → Extracted insight: {insight[:80]}...")
-
+                    logger.debug(f"→ Extracted insight: {insight[:80]}...")
         logger.info(f"   ✓ Extracted {len(insights)} insights from analysis")
-        return insights[:10]  # Limit to 10 best insights
+        return insights[:10]
 
     def _extract_comparisons(self, content: str) -> List[Dict[str, Any]]:
         """Extract comparative findings."""
