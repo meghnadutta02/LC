@@ -363,3 +363,38 @@ class VectorStore:
         except Exception as e:
             logger.error(f"Error finding similar documents: {str(e)}")
             raise
+
+    async def keyword_search(self, keywords: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        Perform keyword-based search (simple text match) on documents.
+        """
+        logger.info(f"Performing keyword search for: {keywords}")
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            sql = """
+                SELECT
+                    id, title, content, source_url, metadata
+                FROM documents
+                WHERE content ILIKE %s OR title ILIKE %s
+                LIMIT %s
+            """
+            like_pattern = f"%{keywords}%"
+            cursor.execute(sql, (like_pattern, like_pattern, max_results))
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            results = []
+            for row in rows:
+                results.append({
+                    "id": row[0],
+                    "title": row[1],
+                    "content": row[2],
+                    "source_url": row[3],
+                    "metadata": row[4]
+                })
+            return results
+        except Exception as e:
+            logger.error(f"Error in keyword_search: {str(e)}")
+            raise
