@@ -5,6 +5,8 @@ Main FastAPI app with integrated MCP protocol server.
 - MCP server mounted under /mcp path
 """
 
+from graph.nodes import create_llm
+from agents.coordinator import CoordinatorAgent
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -87,6 +89,25 @@ async def agent_updates_ws(websocket: WebSocket):
     try:
         while True:
             await websocket.receive_text()  # Keep connection alive (no-op, for now)
+    except Exception:
+        pass
+    finally:
+        active_websockets.discard(websocket)
+coordinator_agent = CoordinatorAgent(create_llm())
+
+
+@ws_router.websocket("/ws/agent-updates")
+async def agent_updates_ws(websocket: WebSocket):
+    await websocket.accept()
+    active_websockets.add(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            if message.get("action") == "human_feedback":
+                # Process human feedback asynchronously here
+                coordinator_agent.receive_human_feedback(message)
+                logger.info(f"Human feedback received: {message}")
     except Exception:
         pass
     finally:
