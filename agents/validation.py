@@ -11,7 +11,7 @@ Responsible for:
 from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
-
+from main import broadcast_agent_update
 from graph.state import ResearchState
 from utils.logger import setup_logger
 
@@ -50,8 +50,25 @@ Be critical, thorough, and objective."""
         logger.info(f" Insights to verify: {len(insights)}")
         logger.info("=" * 80)
 
+        # Real-time: broadcast start
+        await broadcast_agent_update({
+            "phase": "validation",
+            "status": "started",
+            "query": query,
+            "documents_count": len(documents),
+            "insights_count": len(insights)
+        })
+
         if not documents or not insights:
             logger.warning("️  Insufficient data for validation")
+
+            # Real-time: broadcast finish for insufficient data
+            await broadcast_agent_update({
+                "phase": "validation",
+                "status": "finished",
+                "result": "insufficient_data"
+            })
+
             return self._default_validation()
 
         # Log what's being validated
@@ -74,7 +91,7 @@ Be critical, thorough, and objective."""
         logger.info(
             f"    Confidence Score: {validation_results['confidence']:.2%}")
         logger.info(
-            f"   ️  Contradictions Found: {len(validation_results['contradictions'])}")
+            f"     Contradictions Found: {len(validation_results['contradictions'])}")
 
         # Log credibility assessment
         logger.info(" Source Credibility Assessment:")
@@ -85,6 +102,17 @@ Be critical, thorough, and objective."""
         logger.info(
             f" VALIDATION COMPLETED: Confidence {validation_results['confidence']:.2%}")
         logger.info("=" * 80)
+
+        # Real-time: broadcast finish
+        await broadcast_agent_update({
+            "phase": "validation",
+            "status": "finished",
+            "result": {
+                "confidence": validation_results['confidence'],
+                "contradictions_count": len(validation_results['contradictions']),
+                "credibility_summary": validation_results['credibility']
+            }
+        })
 
         return validation_results
 

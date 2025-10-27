@@ -12,6 +12,7 @@ from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from datetime import datetime
+from main import broadcast_agent_update
 
 from graph.state import ResearchState
 from utils.logger import setup_logger
@@ -47,13 +48,8 @@ The report should be:
     async def process(self, state: ResearchState) -> Dict[str, Any]:
         """
         Format the final comprehensive research report.
-
-        Args:
-            state: Current workflow state
-
-        Returns:
-            Dictionary with formatted report and citations
         """
+
         query = state["query"]
         documents = state.get("retrieved_documents", [])
         insights = state.get("insights", [])
@@ -68,27 +64,41 @@ The report should be:
         logger.info(f" Confidence: {confidence:.2%}")
         logger.info("=" * 80)
 
+        # Real-time: broadcast start of formatting
+        await broadcast_agent_update({
+            "phase": "formatting",
+            "status": "started",
+            "query": query,
+            "documents": len(documents),
+            "insights": len(insights),
+            "confidence": confidence
+        })
+
         # Generate comprehensive report
         logger.info(" STEP 1: Generating comprehensive report...")
         report = await self._generate_detailed_report(
             query, documents, insights, analysis, confidence
         )
-        logger.info(f"    Report generated ({len(report.split())} words)")
+        logger.info(f"     Report generated ({len(report.split())} words)")
 
         # Generate executive summary
         logger.info(" STEP 2: Generating executive summary...")
         summary = await self._generate_summary(query, insights, confidence)
-        logger.info(f"    Summary generated ({len(summary.split())} words)")
+        logger.info(f"     Summary generated ({len(summary.split())} words)")
 
         # Format complete citations
         logger.info(" STEP 3: Formatting citations...")
-        citations = self._format_detailed_citations(
-            documents, query)  # Pass query here
-        logger.info(f"    {len(citations)} citations formatted")
+        citations = self._format_detailed_citations(documents, query)
+        logger.info(f"     {len(citations)} citations formatted")
 
-        logger.info("=" * 80)
-        logger.info(" FORMATTING COMPLETED")
-        logger.info("=" * 80)
+        # Real-time: broadcast completion
+        await broadcast_agent_update({
+            "phase": "formatting",
+            "status": "finished",
+            "report_word_count": len(report.split()),
+            "summary_word_count": len(summary.split()),
+            "citations_count": len(citations)
+        })
 
         return {
             "report": report,

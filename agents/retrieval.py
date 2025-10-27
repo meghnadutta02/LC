@@ -4,8 +4,10 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from graph.state import ResearchState
 from database.vector_store import VectorStore
-from tools.retrieval_tools import web_search_tool, extract_text_tool
+from tools.retrieval_tools import web_search_tool
 from utils.logger import setup_logger
+# Adjust import to your broadcast util location
+from main import broadcast_agent_update
 
 logger = setup_logger("retrieval_agent")
 
@@ -15,14 +17,14 @@ class RetrievalAgent:
     Retrieval Agent with database-first strategy.
 
     Flow:
-    1. Check existing documents in database (semantic + keyword search)
+    1. Semantic+keyword search in database
     2. If insufficient, perform web search
     3. Store all new documents with embeddings
     4. Track and log all sources
+    5. Broadcast real-time updates
     """
 
     def __init__(self, llm: ChatOpenAI, workflow_id: str):
-        """Initialize retrieval agent."""
         self.llm = llm
         self.workflow_id = workflow_id
         self.vector_store = VectorStore()
@@ -33,76 +35,74 @@ Your responsibilities:
 2. Identify high-quality sources
 3. Extract key information
 
-Generate 3-5 diverse search queries that cover different aspects of the topic."""
+Generate 3-5 diverse search queries covering different topics."""
 
         logger.info(
             f"[RETRIEVAL] Retrieval Agent initialized for workflow {workflow_id}")
 
     async def process(self, state: ResearchState) -> Dict[str, Any]:
-        """
-        Process retrieval with database-first approach combining semantic and keyword search.
-
-        Args:
-            state: Current workflow state
-
-        Returns:
-            Dictionary with retrieved documents and their IDs
-        """
         query = state["query"]
         context = state.get("context", "")
 
         logger.info("=" * 80)
-        logger.info(f"[RETRIEVAL] RETRIEVAL AGENT PROCESSING")
-        logger.info(f"[RETRIEVAL] Query: {query}")
-        logger.info(f"[RETRIEVAL] Context: {context}")
-        logger.info("=" * 80)
+        logger.info(f"[RETRIEVAL] Starting retrieval for query: {query}")
+        await broadcast_agent_update({
+            "phase": "retrieval", "status": "started", "query": query
+        })
 
-        # Step 1: Semantic search in database
-        logger.info(
-            "[RETRIEVAL] STEP 1: Performing semantic search in database...")
+        # Step 1: Semantic search
+        logger.info("[RETRIEVAL] STEP 1: Semantic search in database...")
         db_semantic_docs = await self._check_database(query)
 
-        # Step 2: Keyword search in database if semantic insufficient
+        # Step 2: Keyword fallback search if needed
         db_keyword_docs = []
         if len(db_semantic_docs) < 3:
             logger.info(
-                f"[RETRIEVAL] STEP 2: Insufficient semantic results ({len(db_semantic_docs)}), performing keyword search...")
+                "[RETRIEVAL] STEP 2: Insufficient semantic results, performing keyword search...")
             db_keyword_docs = await self.vector_store.keyword_search(query, max_results=10)
 
-        # Merge semantic and keyword results with deduplication
+        # Merge and deduplicate documents
         combined_docs_dict = {}
-        for doc in (db_semantic_docs + db_keyword_docs):
+        for doc in db_semantic_docs + db_keyword_docs:
             key = doc.get("id") or doc.get("content")[:200]
             if key not in combined_docs_dict:
                 combined_docs_dict[key] = doc
         combined_docs = list(combined_docs_dict.values())
+        logger.info(f"[RETRIEVAL] Combined docs count: {len(combined_docs)}")
 
-        logger.info(
-            f"[RETRIEVAL] Combined total documents from DB: {len(combined_docs)}")
+        await broadcast_agent_update({
+            "phase": "retrieval", "status": "query_db_finished", "documents_found": len(combined_docs)
+        })
 
-        # Step 3: Search web if still insufficient results
+        # Step 3: Web search if still insufficient
         web_documents = []
         if len(combined_docs) < 3:
             logger.info(
-                f"[RETRIEVAL] STEP 3: Insufficient combined docs ({len(combined_docs)}), performing web search...")
+                "[RETRIEVAL] STEP 3: Performing web search due to insufficient docs")
             web_documents = await self._search_web(query, context)
             combined_docs.extend(web_documents)
 
-        # Step 4: Store new documents from web search
-        logger.info("[RETRIEVAL] STEP 4: Storing new documents in database...")
+        await broadcast_agent_update({
+            "phase": "retrieval", "status": "web_search_finished", "web_documents_found": len(web_documents)
+        })
+
+        # Step 4: Store new web docs
+        logger.info("[RETRIEVAL] STEP 4: Storing new documents to DB...")
         document_ids = await self._store_documents(web_documents)
 
-        # Log sources summary
+        # Log all sources
         logger.info("=" * 80)
-        logger.info("[RETRIEVAL] SOURCES SUMMARY")
-        logger.info("=" * 80)
+        logger.info("[RETRIEVAL] Sources summary:")
         for i, doc in enumerate(combined_docs, 1):
-            logger.info(f"[SOURCE {i}] {doc.get('title', 'Untitled')[:60]}")
-            logger.info(f"           URL: {doc.get('source_url', 'N/A')}")
+            logger.info(
+                f"[SOURCE {i}] {doc.get('title', 'Untitled')[:60]} - {doc.get('source_url', 'N/A')}")
         logger.info("=" * 80)
         logger.info(
-            f"[RETRIEVAL] RETRIEVAL COMPLETED: {len(combined_docs)} documents retrieved")
-        logger.info("=" * 80)
+            f"[RETRIEVAL] Retrieval complete with {len(combined_docs)} documents")
+
+        await broadcast_agent_update({
+            "phase": "retrieval", "status": "finished", "total_documents": len(combined_docs)
+        })
 
         return {
             "documents": combined_docs,
@@ -111,118 +111,89 @@ Generate 3-5 diverse search queries that cover different aspects of the topic.""
         }
 
     async def _check_database(self, query: str) -> List[Dict[str, Any]]:
-        """Check database for existing relevant documents with semantic search."""
-        logger.info(f"[DATABASE] Semantic search for: '{query}'")
+        logger.info(f"[RETRIEVAL] Semantic DB search for '{query}'")
         try:
             results = await self.vector_store.search(query=query, max_results=5, similarity_threshold=0.75)
-            logger.info(
-                f"[DATABASE] Found {len(results)} documents by semantic search")
-            for i, doc in enumerate(results, 1):
-                logger.info(
-                    f"  #{i}: {doc.get('title', 'Untitled')[:50]}... (similarity: {doc.get('similarity', 0):.2%})")
+            logger.info(f"[RETRIEVAL] Found {len(results)} semantic results")
             return results
         except Exception as e:
-            logger.error(f"[DATABASE] Semantic search error: {str(e)}")
+            logger.error(f"[RETRIEVAL] Error during semantic search: {e}")
             return []
 
     async def _search_web(self, query: str, context: str) -> List[Dict[str, Any]]:
-        """Search web for new documents."""
-        logger.info(f"[WEB SEARCH] Initiating web search for: '{query}'")
-
-        # Generate search queries using LLM
+        logger.info(f"[RETRIEVAL] Web search started for '{query}'")
         search_queries = await self._generate_search_queries(query, context)
-        logger.info(
-            f"[SEARCH QUERIES] Generated {len(search_queries)} queries:")
-        for i, sq in enumerate(search_queries, 1):
-            logger.info(f"  {i}. {sq}")
+        logger.info(f"[RETRIEVAL] Generated {len(search_queries)} queries")
 
-        all_documents = []
+        all_docs = []
         all_sources = []
 
-        for i, search_query in enumerate(search_queries, 1):
-            logger.info(
-                f"[SEARCH {i}/{len(search_queries)}] Executing: '{search_query}'")
+        for i, sq in enumerate(search_queries, 1):
+            logger.info(f"[RETRIEVAL] Executing web search query {i}: {sq}")
             try:
-                result = await web_search_tool.ainvoke({"query": search_query, "max_results": 3})
+                result = await web_search_tool.ainvoke({"query": sq, "max_results": 3})
                 documents = result.get("results", [])
                 sources = result.get("sources", [])
-
-                logger.info(f"[RESULTS] Found {len(documents)} results")
-                if sources:
-                    logger.info(f"[SOURCES FOUND]:")
-                    for j, source in enumerate(sources, 1):
-                        logger.info(f"  {j}. {source['title']}")
-                        logger.info(f"     URL: {source['url']}")
-                        all_sources.append(source)
-
+                all_sources.extend(sources)
                 for doc in documents:
                     detailed_doc = {
                         "title": doc.get("title", "Untitled"),
                         "content": doc.get("snippet", ""),
                         "source_url": doc.get("url", "N/A"),
-                        "search_query": search_query,
+                        "search_query": sq,
                         "metadata": {
                             "relevance": "high",
                             "source": doc.get("source", "web"),
                             "search_index": i
                         }
                     }
-                    all_documents.append(detailed_doc)
-                    logger.info(f"  - {detailed_doc['title'][:60]}...")
+                    all_docs.append(detailed_doc)
+                    logger.info(
+                        f"[RETRIEVAL] Found doc: {detailed_doc['title'][:60]}")
             except Exception as e:
-                logger.error(f"[ERROR] Search error: {str(e)}")
+                logger.error(f"[RETRIEVAL] Web search error: {e}")
 
-        logger.info(f"[SUMMARY] Total sources found: {len(all_sources)}")
         logger.info(
-            f"[SUMMARY] Total documents retrieved: {len(all_documents)}")
-        return all_documents
+            f"[RETRIEVAL] Web search completed: {len(all_docs)} documents found")
+        return all_docs
 
     async def _generate_search_queries(self, query: str, context: str) -> List[str]:
-        """Generate diverse search queries."""
-        logger.info("[LLM] Generating search queries using LLM...")
-
+        logger.info("[RETRIEVAL] Generating search queries using LLM")
         messages = [
             SystemMessage(content=self.system_prompt),
             HumanMessage(
-                content=f"Research Query: {query}\nContext: {context}\n\nGenerate 4 diverse search queries to find comprehensive information. Return only the queries, one per line.")
+                content=f"Research Query: {query}\nContext: {context}\n\nGenerate 4 diverse search queries one per line.")
         ]
-
         response = await self.llm.ainvoke(messages)
         queries = [
-            line.strip().lstrip("- ").lstrip("* ").strip('"')
-            for line in response.content.split("\n")
-            if line.strip() and not line.strip().startswith("#")
+            line.strip().lstrip("-* ").strip('"') for line in response.content.splitlines() if line.strip()
         ]
         if query not in queries:
             queries.insert(0, query)
         return queries[:4]
 
     async def _store_documents(self, documents: List[Dict[str, Any]]) -> List[int]:
-        """Store documents with embeddings."""
         if not documents:
-            logger.info("[STORAGE] No new documents to store")
+            logger.info("[RETRIEVAL] No documents to store")
             return []
-
         logger.info(
-            f"[STORAGE] Storing {len(documents)} documents with embeddings...")
-        document_ids = []
-
+            f"[RETRIEVAL] Storing {len(documents)} documents with embeddings")
+        ids = []
         for i, doc in enumerate(documents, 1):
             try:
                 logger.info(
-                    f"[STORAGE] [{i}/{len(documents)}] Storing '{doc.get('title', 'Untitled')[:40]}...'")
+                    f"[RETRIEVAL] Storing doc [{i}/{len(documents)}]: {doc.get('title', 'Untitled')[:40]}...")
                 doc_id = await self.vector_store.store_document(
                     workflow_id=self.workflow_id,
                     content=doc["content"],
                     title=doc.get("title"),
                     source_url=doc.get("source_url"),
-                    metadata=doc.get("metadata", {})
+                    metadata=doc.get("metadata", {}),
+                    # Store original search query
+                    query=doc.get("search_query", None)
                 )
-                document_ids.append(doc_id)
-                logger.info(f"[STORAGE] Document ID: {doc_id}")
+                ids.append(doc_id)
+                logger.info(f"[RETRIEVAL] Stored doc id: {doc_id}")
             except Exception as e:
-                logger.error(f"[STORAGE] Storage error: {str(e)}")
-
-        logger.info(
-            f"[STORAGE] Successfully stored {len(document_ids)} documents")
-        return document_ids
+                logger.error(f"[RETRIEVAL] Error storing document: {e}")
+        return ids

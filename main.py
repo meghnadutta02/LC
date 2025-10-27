@@ -8,7 +8,8 @@ Main FastAPI app with integrated MCP protocol server.
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from fastapi import WebSocket, APIRouter
+
 from mcp.server import Server
 import asyncio
 
@@ -21,34 +22,9 @@ logger = setup_logger("fastapi_mcp_app")
 # Create MCP server instance
 mcp_server = Server("research-assistant")
 
+ws_router = APIRouter()
 
-@mcp_server.call_tool()
-async def research_query(query: str, context: str = "") -> str:
-    logger.info(f"[MCP TOOL] research_query called with query: {query}")
-    try:
-        graph = create_research_graph()
-        initial_state = {
-            "query": query,
-            "context": context,
-            "workflow_id": f"mcp_{id(query)}",
-            "max_iterations": settings.max_iterations,
-            "messages": [],
-            "current_step": "coordinator"
-        }
-        config = {"recursion_limit": settings.recursion_limit}
-        result = await graph.ainvoke(initial_state, config)
-        return result.get("final_report", "No report generated")
-    except Exception as e:
-        logger.error(f"[MCP TOOL] Error in research_query: {str(e)}")
-        return f"Error: {str(e)}"
-
-
-@mcp_server.list_tools()
-async def list_tools():
-    return [
-        {"name": "research_query",
-         "description": "Run a research query, return full report."}
-    ]
+active_websockets = set()
 
 
 # Create main FastAPI app
@@ -67,16 +43,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount MCP server under /mcp path
-app.mount("/mcp", mcp_server.asgi_app())
-
-
-class Citation(BaseModel):
-    id: int
-    title: str
-    url: str
-    preview: str
-
 
 class AssistantRequest(BaseModel):
     query: str = Field(..., min_length=10, description="Research query")
@@ -86,7 +52,6 @@ class AssistantRequest(BaseModel):
 class AssistantResponse(BaseModel):
     query: str
     final_report: str
-    citations: List[Citation] = []
 
 
 @app.post("/assistant", response_model=AssistantResponse)
@@ -104,22 +69,7 @@ async def assistant_endpoint(request: AssistantRequest):
         }
         config = {"recursion_limit": settings.recursion_limit}
         result = await graph.ainvoke(initial_state, config)
-
-        documents = result.get("retrieved_documents", [])
-        citations = []
-        for i, doc in enumerate(documents, 1):
-            citations.append({
-                "id": i,
-                "title": doc.get("title", "Untitled Document"),
-                "url": doc.get("source_url", "N/A"),
-                "preview": (doc.get("content", "")[:150] + "...") if doc.get("content") else ""
-            })
-
-        return AssistantResponse(
-            query=request.query,
-            final_report=result.get("final_report", ""),
-            citations=citations
-        )
+        return AssistantResponse(query=request.query, final_report=result.get("final_report", ""))
     except Exception as e:
         logger.error(f"[HTTP API] Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -128,6 +78,31 @@ async def assistant_endpoint(request: AssistantRequest):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "version": "1.0.0"}
+
+
+@ws_router.websocket("/ws/agent-updates")
+async def agent_updates_ws(websocket: WebSocket):
+    await websocket.accept()
+    active_websockets.add(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # Keep connection alive (no-op, for now)
+    except Exception:
+        pass
+    finally:
+        active_websockets.discard(websocket)
+
+
+async def broadcast_agent_update(msg: dict):
+    # Use 'active_websockets' if using the router version, else inject set from global app context
+    dead_websockets = set()
+    for ws in active_websockets:
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            dead_websockets.add(ws)
+    for ws in dead_websockets:
+        active_websockets.discard(ws)
 
 
 if __name__ == "__main__":
